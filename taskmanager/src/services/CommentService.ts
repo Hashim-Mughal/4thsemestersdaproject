@@ -3,9 +3,10 @@
 // Responsibility: Orchestrate comment business logic.
 // ============================================================
 
-import { ICommentRepository, ITaskRepository } from '../repositories';
-import { CommentFactory } from '../factories';
-import { EventBus }       from '../observers';
+import { ICommentRepository } from '../repositories/interfaces/ICommentRepository';
+import { ITaskRepository }    from '../repositories/interfaces/ITaskRepository';
+import { CommentFactory }     from '../factories/CommentFactory';
+import { EventBus }           from '../observers/EventBus';
 
 export class CommentService {
   constructor(
@@ -17,7 +18,6 @@ export class CommentService {
     const task = await this.taskRepo.findById(taskId);
     if (!task) throw new Error('TASK_NOT_FOUND');
 
-    // Factory builds the DTO
     const dto     = CommentFactory.create({ text, taskId, author: userId });
     const comment = await this.commentRepo.save(dto);
 

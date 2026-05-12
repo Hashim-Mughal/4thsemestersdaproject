@@ -1,31 +1,26 @@
 // ============================================================
 // SERVICE: TaskService
 // Responsibility: Orchestrate task business logic.
-//
-// Key design: status change detection happens HERE in the
-// service — not in the route. When status → 'done', the service
-// emits TASK_COMPLETED. The TaskCompletionNotifier in observers
-// reacts to that — zero coupling between the two.
+// Status change detection happens here — not in the route.
 // ============================================================
 
-import { ITaskRepository, IUserRepository } from '../repositories';
-import { TaskFactory }   from '../factories';
-import { EventBus }      from '../observers';
-import { NotificationService } from '../strategies';
+import { ITaskRepository }    from '../repositories/interfaces/ITaskRepository';
+import { IUserRepository }    from '../repositories/interfaces/IUserRepository';
+import { TaskFactory }        from '../factories/TaskFactory';
+import { EventBus }           from '../observers/EventBus';
+import { NotificationService } from '../strategies/NotificationService';
 import { CreateTaskDTO, UpdateTaskDTO, TaskFilter, TaskStatus } from '../types';
 
 export class TaskService {
   constructor(
-    private readonly taskRepo:   ITaskRepository,
-    private readonly userRepo:   IUserRepository,
-    private readonly notifier:   NotificationService
+    private readonly taskRepo:  ITaskRepository,
+    private readonly userRepo:  IUserRepository,
+    private readonly notifier:  NotificationService
   ) {}
 
   async createTask(dto: Omit<CreateTaskDTO, 'createdBy'>, userId: string) {
-    // Factory builds the DTO with proper defaults — service doesn't hardcode them
     const taskDTO = TaskFactory.create({ ...dto, createdBy: userId });
     const task    = await this.taskRepo.save(taskDTO);
-
     EventBus.emit('TASK_CREATED', { id: String(task._id), title: task.title }, userId);
     return task;
   }
@@ -46,33 +41,24 @@ export class TaskService {
     if (!existing) throw new Error('TASK_NOT_FOUND');
     if (String(existing.createdBy) !== userId) throw new Error('FORBIDDEN');
 
-    // Detect status change BEFORE updating
     const statusChanged = dto.status && dto.status !== existing.status;
-    const isCompleted   = dto.status === 'done' as TaskStatus && existing.status !== 'done';
+    const isCompleted   = dto.status === ('done' as TaskStatus) && existing.status !== 'done';
 
     const updated = await this.taskRepo.update(id, dto);
     if (!updated) throw new Error('TASK_NOT_FOUND');
 
-    // Emit granular events — observers decide what to do
     EventBus.emit('TASK_UPDATED', { id, changes: dto }, userId);
 
     if (statusChanged) {
-      EventBus.emit('TASK_STATUS_CHANGED', {
-        id,
-        from: existing.status,
-        to:   dto.status
-      }, userId);
+      EventBus.emit('TASK_STATUS_CHANGED', { id, from: existing.status, to: dto.status }, userId);
     }
 
     if (isCompleted) {
-      // TASK_COMPLETED triggers TaskCompletionNotifier automatically
       EventBus.emit('TASK_COMPLETED', { id, title: updated.title }, userId);
-
-      // Also send notification via Strategy
       await this.notifier.notify({
-        recipient: userId,  // in real app: look up user email
+        recipient: userId,
         subject:   'Task Completed!',
-        message:   `Your task "${updated.title}" has been marked as done.`
+        message:   `Your task "${updated.title}" has been marked as done.`,
       });
     }
 

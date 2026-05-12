@@ -1,56 +1,42 @@
 // ============================================================
 // SERVICE: UserService
 // Responsibility: Orchestrate user business logic.
-//
-// Dependencies (all injected — never new'd here):
-//   - IUserRepository  (data access abstraction)
-//   - AuthService      (token generation)
-//   - UserFactory      (creation + password hashing)
-//   - EventBus         (event emission)
-//   - NotificationService (notification strategy)
-//
-// SOLID:
-//   S — Business logic only. No HTTP, no DB driver, no template.
-//   D — All dependencies are abstractions passed in, not instantiated.
+// SOLID D — all dependencies injected, never new'd here.
 // ============================================================
 
-import { IUserRepository } from '../repositories';
-import { UserFactory }     from '../factories';
-import { EventBus }        from '../observers';
-import { AuthService }     from './AuthService';
-import { NotificationService } from '../strategies';
+import { IUserRepository }    from '../repositories/interfaces/IUserRepository';
+import { UserFactory }        from '../factories/UserFactory';
+import { EventBus }           from '../observers/EventBus';
+import { AuthService }        from './AuthService';
+import { NotificationService } from '../strategies/NotificationService';
 import { CreateUserDTO, LoginDTO, UpdateUserDTO, AuthResult, IUser } from '../types';
 
 export class UserService {
   constructor(
-    private readonly userRepo:   IUserRepository,
+    private readonly userRepo:    IUserRepository,
     private readonly authService: AuthService,
-    private readonly notifier:   NotificationService
+    private readonly notifier:    NotificationService
   ) {}
 
   async register(dto: CreateUserDTO): Promise<AuthResult> {
-    // Check duplicate via repository abstraction — not raw Mongoose
     const existing = await this.userRepo.findByEmail(dto.email);
     if (existing) throw new Error('EMAIL_TAKEN');
 
-    // Factory handles hashing — UserService never touches bcrypt
     const prepared = await UserFactory.create(dto);
     const user     = await this.userRepo.save(prepared);
 
-    // Observer: log the event — UserService doesn't care who's listening
     EventBus.emit('USER_REGISTERED', { email: user.email, name: user.name }, String(user._id));
 
-    // Notification via Strategy — could be console, email, or SMS
     await this.notifier.notify({
       recipient: user.email,
       subject:   'Welcome to TaskManager',
-      message:   `Hi ${user.name}, your account has been created successfully.`
+      message:   `Hi ${user.name}, your account has been created successfully.`,
     });
 
     const token = this.authService.generateToken({
       id:    String(user._id),
       email: user.email,
-      role:  user.role
+      role:  user.role,
     });
 
     const { password: _, ...safeUser } = user;
@@ -61,7 +47,6 @@ export class UserService {
     const user = await this.userRepo.findByEmail(dto.email);
     if (!user) throw new Error('INVALID_CREDENTIALS');
 
-    // Factory owns verification — strategy can change without touching this method
     const valid = await UserFactory.verifyPassword(dto.password, user.password);
     if (!valid) throw new Error('INVALID_CREDENTIALS');
 
@@ -70,7 +55,7 @@ export class UserService {
     const token = this.authService.generateToken({
       id:    String(user._id),
       email: user.email,
-      role:  user.role
+      role:  user.role,
     });
 
     const { password: _, ...safeUser } = user;
